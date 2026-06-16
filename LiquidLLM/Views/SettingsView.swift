@@ -7,99 +7,118 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                LiquidBackground()
+                AppBackground()
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
+                    VStack(spacing: 18) {
                         promptSection
                         generationSection
                         huggingFaceSection
                     }
-                    .padding(22)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 18)
                 }
             }
             .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(AppTheme.background, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
+                    Button("Done") {
                         appState.saveNow()
                         dismiss()
-                    } label: {
-                        Image(systemName: "checkmark")
                     }
-                    .buttonStyle(.glassProminent)
+                    .fontWeight(.semibold)
                 }
+            }
+            .tint(AppTheme.text)
+            .onChange(of: appState.settings) { _, _ in
+                appState.saveSoon()
             }
         }
     }
 
     private var promptSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("System Prompt", systemImage: "text.alignleft")
-                .font(.system(.headline, design: .rounded, weight: .bold))
-                .foregroundStyle(.white)
+        SettingsSection(title: "Instructions") {
             TextField("System prompt", text: $appState.settings.systemPrompt, axis: .vertical)
-                .lineLimit(4...10)
-                .font(.system(.body, design: .rounded))
+                .lineLimit(4...8)
+                .font(.body)
                 .textFieldStyle(.plain)
-                .foregroundStyle(.white)
-                .padding(14)
-                .liquidGlass(cornerRadius: 18, tint: .white.opacity(0.05), interactive: true)
-                .onChange(of: appState.settings) { _, _ in appState.saveSoon() }
+                .foregroundStyle(AppTheme.text)
+                .padding(12)
+                .background(AppTheme.surfaceElevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .padding(16)
-        .liquidGlass(cornerRadius: 26, tint: .white.opacity(0.08))
     }
 
     private var generationSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Label("Generation", systemImage: "dial.medium")
-                .font(.system(.headline, design: .rounded, weight: .bold))
-                .foregroundStyle(.white)
-
-            VStack(alignment: .leading, spacing: 8) {
+        SettingsSection(title: "Generation") {
+            VStack(spacing: 0) {
                 HStack {
                     Text("Temperature")
                     Spacer()
                     Text(appState.settings.temperature, format: .number.precision(.fractionLength(2)))
+                        .foregroundStyle(AppTheme.secondaryText)
                 }
-                .font(.system(.callout, design: .rounded, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.76))
-                Slider(value: $appState.settings.temperature, in: 0...2, step: 0.05)
-                    .tint(AppTheme.mint)
-            }
+                .font(.body)
+                .foregroundStyle(AppTheme.text)
 
-            Stepper(value: $appState.settings.maximumTokens, in: 64...4096, step: 64) {
-                HStack {
-                    Text("Max response")
-                    Spacer()
-                    Text("\(appState.settings.maximumTokens) tokens")
-                        .foregroundStyle(.white.opacity(0.58))
+                Slider(value: $appState.settings.temperature, in: 0...2, step: 0.05)
+                    .tint(AppTheme.accent)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
+
+                Hairline()
+
+                Stepper(value: $appState.settings.maximumTokens, in: 64...4096, step: 64) {
+                    HStack {
+                        Text("Max response")
+                        Spacer()
+                        Text("\(appState.settings.maximumTokens) tokens")
+                            .foregroundStyle(AppTheme.secondaryText)
+                    }
+                    .font(.body)
+                    .foregroundStyle(AppTheme.text)
                 }
-                .font(.system(.callout, design: .rounded, weight: .semibold))
-                .foregroundStyle(.white)
+                .padding(.top, 12)
             }
-            .onChange(of: appState.settings) { _, _ in appState.saveSoon() }
         }
-        .padding(16)
-        .liquidGlass(cornerRadius: 26, tint: .white.opacity(0.08))
     }
 
     private var huggingFaceSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Hugging Face", systemImage: "key")
-                .font(.system(.headline, design: .rounded, weight: .bold))
-                .foregroundStyle(.white)
-
-            SecureField("Access token for private or gated repos", text: $appState.settings.huggingFaceToken)
+        SettingsSection(title: "Hugging Face") {
+            SecureField("Access token", text: $appState.settings.huggingFaceToken)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .font(.system(.body, design: .rounded))
-                .foregroundStyle(.white)
-                .padding(14)
-                .liquidGlass(cornerRadius: 18, tint: .white.opacity(0.05), interactive: true)
-                .onChange(of: appState.settings) { _, _ in appState.saveSoon() }
+                .font(.body)
+                .textFieldStyle(.plain)
+                .foregroundStyle(AppTheme.text)
+                .padding(12)
+                .background(AppTheme.surfaceElevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .padding(16)
-        .liquidGlass(cornerRadius: 26, tint: .white.opacity(0.08))
+    }
+}
+
+private struct SettingsSection<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(AppTheme.secondaryText)
+                .textCase(.uppercase)
+                .padding(.horizontal, 2)
+
+            VStack(alignment: .leading, spacing: 0) {
+                content
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(AppTheme.hairline, lineWidth: 0.5)
+            }
+        }
     }
 }

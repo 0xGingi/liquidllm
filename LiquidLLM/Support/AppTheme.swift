@@ -1,13 +1,17 @@
 import SwiftUI
 
 enum AppTheme {
-    static let ink = Color(red: 0.025, green: 0.027, blue: 0.032)
-    static let graphite = Color(red: 0.10, green: 0.105, blue: 0.115)
-    static let porcelain = Color(red: 0.93, green: 0.96, blue: 0.96)
-    static let mint = Color(red: 0.45, green: 0.95, blue: 0.78)
-    static let coral = Color(red: 1.0, green: 0.42, blue: 0.34)
-    static let amber = Color(red: 1.0, green: 0.72, blue: 0.30)
-    static let blue = Color(red: 0.32, green: 0.68, blue: 1.0)
+    static let background = Color(red: 0.04, green: 0.04, blue: 0.04)
+    static let surface = Color(red: 0.12, green: 0.12, blue: 0.12)
+    static let surfaceElevated = Color(red: 0.17, green: 0.17, blue: 0.17)
+    static let surfacePressed = Color(red: 0.22, green: 0.22, blue: 0.22)
+    static let text = Color.white
+    static let secondaryText = Color.white.opacity(0.64)
+    static let tertiaryText = Color.white.opacity(0.42)
+    static let hairline = Color.white.opacity(0.10)
+    static let accent = Color(red: 0.20, green: 0.56, blue: 1.0)
+    static let warning = Color(red: 1.0, green: 0.72, blue: 0.30)
+    static let destructive = Color(red: 1.0, green: 0.38, blue: 0.34)
 
     static func relativeDateString(for date: Date) -> String {
         let formatter = RelativeDateTimeFormatter()
@@ -16,134 +20,50 @@ enum AppTheme {
     }
 }
 
-struct LiquidBackground: View {
+struct AppBackground: View {
     var body: some View {
-        TimelineView(.animation) { timeline in
-            Canvas { context, size in
-                let seconds = timeline.date.timeIntervalSinceReferenceDate
-                let width = size.width
-                let height = size.height
-                let phase = CGFloat(seconds.truncatingRemainder(dividingBy: 18) / 18)
-
-                context.fill(
-                    Path(CGRect(origin: .zero, size: size)),
-                    with: .linearGradient(
-                        Gradient(colors: [
-                            AppTheme.ink,
-                            Color(red: 0.06, green: 0.075, blue: 0.08),
-                            Color(red: 0.05, green: 0.045, blue: 0.04)
-                        ]),
-                        startPoint: .zero,
-                        endPoint: CGPoint(x: width, y: height)
-                    )
-                )
-
-                drawRibbon(
-                    in: &context,
-                    size: size,
-                    yBase: height * (0.23 + 0.04 * sin(phase * .pi * 2)),
-                    thickness: height * 0.28,
-                    color: AppTheme.mint.opacity(0.24),
-                    phase: phase
-                )
-                drawRibbon(
-                    in: &context,
-                    size: size,
-                    yBase: height * (0.67 + 0.035 * cos(phase * .pi * 2)),
-                    thickness: height * 0.24,
-                    color: AppTheme.coral.opacity(0.18),
-                    phase: phase + 0.34
-                )
-                drawRibbon(
-                    in: &context,
-                    size: size,
-                    yBase: height * 0.46,
-                    thickness: height * 0.18,
-                    color: AppTheme.blue.opacity(0.14),
-                    phase: phase + 0.68
-                )
-            }
+        AppTheme.background
             .ignoresSafeArea()
-            .overlay {
-                Rectangle()
-                    .fill(.ultraThinMaterial.opacity(0.26))
-                    .ignoresSafeArea()
-            }
-        }
-    }
-
-    private func drawRibbon(
-        in context: inout GraphicsContext,
-        size: CGSize,
-        yBase: CGFloat,
-        thickness: CGFloat,
-        color: Color,
-        phase: CGFloat
-    ) {
-        let width = size.width
-        let offset = width * (phase - 0.5) * 0.18
-        var path = Path()
-        path.move(to: CGPoint(x: -width * 0.15, y: yBase - thickness * 0.5))
-        path.addCurve(
-            to: CGPoint(x: width * 1.15, y: yBase - thickness * 0.15),
-            control1: CGPoint(x: width * 0.24 + offset, y: yBase - thickness),
-            control2: CGPoint(x: width * 0.70 - offset, y: yBase + thickness * 0.12)
-        )
-        path.addLine(to: CGPoint(x: width * 1.15, y: yBase + thickness * 0.55))
-        path.addCurve(
-            to: CGPoint(x: -width * 0.15, y: yBase + thickness * 0.38),
-            control1: CGPoint(x: width * 0.74 - offset, y: yBase + thickness),
-            control2: CGPoint(x: width * 0.26 + offset, y: yBase - thickness * 0.08)
-        )
-        path.closeSubpath()
-        context.addFilter(.blur(radius: 46))
-        context.fill(path, with: .color(color))
     }
 }
 
-struct GlassPanel: ViewModifier {
-    var cornerRadius: CGFloat = 28
-    var tint: Color? = nil
-    var interactive: Bool = false
-
-    func body(content: Content) -> some View {
-        content
-            .glassEffect(
-                .regular
-                    .tint(tint)
-                    .interactive(interactive),
-                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            )
+struct Hairline: View {
+    var body: some View {
+        Rectangle()
+            .fill(AppTheme.hairline)
+            .frame(height: 0.5)
     }
 }
 
-extension View {
-    func liquidGlass(
-        cornerRadius: CGFloat = 28,
-        tint: Color? = nil,
-        interactive: Bool = false
-    ) -> some View {
-        modifier(GlassPanel(cornerRadius: cornerRadius, tint: tint, interactive: interactive))
-    }
-}
-
-struct MetricChip: View {
-    let icon: String
-    let value: String
-    let tint: Color
+struct IconOnlyButton: View {
+    let systemName: String
+    let accessibilityLabel: String
+    let action: () -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold))
-            Text(value)
-                .font(.system(.caption, design: .rounded, weight: .semibold))
-                .lineLimit(1)
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(AppTheme.text)
+                .frame(width: 38, height: 38)
+                .contentShape(Rectangle())
         }
-        .foregroundStyle(.white.opacity(0.88))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .liquidGlass(cornerRadius: 14, tint: tint.opacity(0.18), interactive: true)
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+struct InlineTag: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption2)
+            .foregroundStyle(AppTheme.secondaryText)
+            .lineLimit(1)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(AppTheme.surfaceElevated, in: Capsule())
     }
 }
 

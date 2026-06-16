@@ -193,15 +193,66 @@ struct HuggingFaceFile: Codable, Hashable, Sendable {
     let size: Int64?
 }
 
+enum HuggingFaceModelVariantKind: String, Codable, Hashable, Sendable {
+    case languageBundle
+    case standaloneAsset
+}
+
+struct HuggingFaceModelVariant: Identifiable, Hashable, Sendable {
+    var id: String
+    var repoID: String
+    var rootPath: String
+    var displayName: String
+    var kind: HuggingFaceModelVariantKind
+    var files: [HuggingFaceFile]
+    var totalBytes: Int64?
+
+    var isChatReadyCandidate: Bool {
+        kind == .languageBundle && !requiresCustomRuntime
+    }
+
+    var requiresCustomRuntime: Bool {
+        let path = rootPath.lowercased()
+        return path.contains("gemma4") && path.contains("_tbl")
+    }
+
+    var subtitle: String {
+        if requiresCustomRuntime {
+            return "Needs custom Gemma runtime"
+        }
+        return switch kind {
+        case .languageBundle:
+            "Language bundle"
+        case .standaloneAsset:
+            "Standalone .aimodel"
+        }
+    }
+}
+
 struct ModelDownloadProgress: Equatable, Sendable {
     var repoID: String
     var completedFiles: Int
     var totalFiles: Int
     var currentFile: String
+    var completedBytes: Int64 = 0
+    var totalBytes: Int64?
+    var currentFileBytes: Int64 = 0
+    var currentFileTotalBytes: Int64?
+    var bytesPerSecond: Double = 0
 
     var fractionCompleted: Double {
+        if let totalBytes, totalBytes > 0 {
+            return min(1, Double(completedBytes) / Double(totalBytes))
+        }
+
         guard totalFiles > 0 else { return 0 }
-        return min(1, Double(completedFiles) / Double(totalFiles))
+        let currentFileFraction: Double
+        if let currentFileTotalBytes, currentFileTotalBytes > 0 {
+            currentFileFraction = min(1, Double(currentFileBytes) / Double(currentFileTotalBytes))
+        } else {
+            currentFileFraction = 0
+        }
+        return min(1, (Double(completedFiles) + currentFileFraction) / Double(totalFiles))
     }
 }
 
@@ -210,4 +261,23 @@ struct PersistedAppData: Codable, Sendable {
     var localModels: [LocalModel]
     var settings: AppSettings
     var selectedThreadID: UUID?
+}
+
+func readableErrorDescription(_ error: Error) -> String {
+    let localized = error.localizedDescription
+    let described = String(describing: error)
+
+    if localized.contains("CoreAIShared.ModelBundle.BundleError"),
+       !described.isEmpty,
+       described != localized {
+        return described
+    }
+
+    if localized.contains("The operation") && localized.contains("error"),
+       !described.isEmpty,
+       described != localized {
+        return described
+    }
+
+    return localized
 }

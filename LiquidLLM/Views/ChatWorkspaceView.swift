@@ -4,67 +4,77 @@ struct ChatWorkspaceView: View {
     @EnvironmentObject private var appState: AppState
     @Binding var showingLibrary: Bool
     @Binding var showingSettings: Bool
-    @Namespace private var glassNamespace
+    @Binding var columnVisibility: NavigationSplitViewVisibility
+    var onShowSidebar: (() -> Void)?
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 0) {
             topBar
+            Hairline()
             messageScroll
-            ComposerView()
+            ComposerView {
+                showingLibrary = true
+            }
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
-        .background(.clear)
+        .background(AppTheme.background)
     }
 
     private var topBar: some View {
-        GlassEffectContainer(spacing: 18) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(appState.selectedThread?.title ?? "New chat")
-                        .font(.system(.title2, design: .rounded, weight: .bold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    Text(appState.selectedModel.subtitle)
-                        .font(.system(.caption, design: .rounded, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.58))
-                        .lineLimit(1)
+        HStack(spacing: 8) {
+            IconOnlyButton(
+                systemName: "sidebar.left",
+                accessibilityLabel: "Show chats"
+            ) {
+                if let onShowSidebar {
+                    onShowSidebar()
+                } else {
+                    columnVisibility = .all
                 }
-
-                Spacer(minLength: 12)
-
-                ModelSelectorButton()
-                    .glassEffectID("model-selector", in: glassNamespace)
-
-                Button {
-                    showingLibrary = true
-                } label: {
-                    Image(systemName: "arrow.down.circle")
-                        .font(.system(size: 17, weight: .semibold))
-                        .frame(width: 40, height: 40)
-                }
-                .buttonStyle(.glass)
-                .help("Model library")
-
-                Button {
-                    showingSettings = true
-                } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 17, weight: .semibold))
-                        .frame(width: 40, height: 40)
-                }
-                .buttonStyle(.glass)
-                .help("Settings")
             }
-            .padding(14)
-            .liquidGlass(cornerRadius: 26, tint: .white.opacity(0.06), interactive: true)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(appState.selectedThread?.title ?? "New chat")
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.text)
+                    .lineLimit(1)
+                ModelSelectorButton()
+            }
+
+            Spacer(minLength: 8)
+
+            IconOnlyButton(
+                systemName: "tray.and.arrow.down",
+                accessibilityLabel: "Model library"
+            ) {
+                showingLibrary = true
+            }
+
+            IconOnlyButton(
+                systemName: "slider.horizontal.3",
+                accessibilityLabel: "Settings"
+            ) {
+                showingSettings = true
+            }
+
+            IconOnlyButton(
+                systemName: "square.and.pencil",
+                accessibilityLabel: "New chat"
+            ) {
+                appState.createThread()
+            }
         }
+        .padding(.horizontal, 14)
+        .frame(height: 58)
+        .background(AppTheme.background)
     }
 
     private var messageScroll: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 18) {
+                LazyVStack(spacing: 0) {
                     if let messages = appState.selectedThread?.messages {
                         ForEach(messages) { message in
                             MessageBubble(message: message)
@@ -72,8 +82,8 @@ struct ChatWorkspaceView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 4)
-                .padding(.vertical, 10)
+                .padding(.top, 18)
+                .padding(.bottom, 10)
             }
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: appState.selectedThread?.messages.last?.text) { _, _ in
@@ -87,7 +97,7 @@ struct ChatWorkspaceView: View {
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
         guard let id = appState.selectedThread?.messages.last?.id else { return }
-        withAnimation(.smooth(duration: 0.32)) {
+        withAnimation(.smooth(duration: 0.24)) {
             proxy.scrollTo(id, anchor: .bottom)
         }
     }
@@ -102,26 +112,22 @@ private struct ModelSelectorButton: View {
                 Button {
                     appState.selectModel(model)
                 } label: {
-                    Label(model.displayName, systemImage: icon(for: model))
+                    Label(model.displayName, systemImage: appState.selectedModel.id == model.id ? "checkmark" : icon(for: model))
                 }
                 .disabled(model.status != .ready)
             }
         } label: {
-            HStack(spacing: 9) {
-                Image(systemName: icon(for: appState.selectedModel))
-                    .foregroundStyle(AppTheme.mint)
+            HStack(spacing: 4) {
                 Text(appState.selectedModel.displayName)
-                    .font(.system(.callout, design: .rounded, weight: .semibold))
+                    .font(.caption)
                     .lineLimit(1)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.52))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 13)
-            .frame(height: 40)
-            .liquidGlass(cornerRadius: 18, tint: AppTheme.mint.opacity(0.15), interactive: true)
+            .foregroundStyle(AppTheme.secondaryText)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 
     private func icon(for model: LocalModel) -> String {
@@ -129,9 +135,9 @@ private struct ModelSelectorButton: View {
         case .appleFoundation:
             "apple.intelligence"
         case .coreAIBundle:
-            "cpu.fill"
+            "cpu"
         case .downloadedFiles:
-            "externaldrive.badge.questionmark"
+            "externaldrive"
         }
     }
 }

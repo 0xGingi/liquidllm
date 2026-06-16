@@ -9,9 +9,11 @@ final class AppState: ObservableObject {
     @Published var settings: AppSettings = .default
     @Published var composerText = ""
     @Published var isGenerating = false
-    @Published var modelSearchText = "Qwen Core AI"
+    @Published var modelSearchText = "coreai"
     @Published var modelResults: [HuggingFaceModel] = []
     @Published var isSearchingModels = false
+    @Published var modelVariants: [String: [HuggingFaceModelVariant]] = [:]
+    @Published var loadingVariantRepoIDs: Set<String> = []
     @Published var downloadProgress: [String: ModelDownloadProgress] = [:]
     @Published var statusMessage = "Ready"
 
@@ -28,7 +30,7 @@ final class AppState: ObservableObject {
 
     var selectedModel: LocalModel {
         guard let modelID = selectedThread?.selectedModelID ?? settingsSelectedModelID,
-              let model = allModels.first(where: { $0.id == modelID }) else {
+              let model = allModels.first(where: { $0.id == modelID && $0.status == .ready }) else {
             return .appleFoundation
         }
         return model
@@ -57,14 +59,22 @@ final class AppState: ObservableObject {
                 localModels = mergeSystemModel(with: data.localModels)
                 settings = data.settings
                 selectedThreadID = data.selectedThreadID ?? threads.first?.id
+                let recoveredModels = recoverDownloadedModels()
+                let refreshedModels = refreshStoredModelCompatibility()
+                if recoveredModels || refreshedModels {
+                    saveNow()
+                }
             } else {
                 threads = [Self.seedThread()]
                 selectedThreadID = threads.first?.id
+                if recoverDownloadedModels() {
+                    saveNow()
+                }
             }
         } catch {
             threads = [Self.seedThread()]
             selectedThreadID = threads.first?.id
-            statusMessage = "Could not load saved state: \(error.localizedDescription)"
+            statusMessage = "Could not load saved state: \(readableErrorDescription(error))"
         }
     }
 
@@ -85,7 +95,7 @@ final class AppState: ObservableObject {
                 selectedThreadID: selectedThreadID
             ))
         } catch {
-            statusMessage = "Save failed: \(error.localizedDescription)"
+            statusMessage = "Save failed: \(readableErrorDescription(error))"
         }
     }
 
@@ -93,6 +103,12 @@ final class AppState: ObservableObject {
         let thread = ChatThread()
         threads.insert(thread, at: 0)
         selectedThreadID = thread.id
+        saveSoon()
+    }
+
+    func selectThread(_ id: UUID) {
+        guard threads.contains(where: { $0.id == id }) else { return }
+        selectedThreadID = id
         saveSoon()
     }
 
@@ -107,6 +123,10 @@ final class AppState: ObservableObject {
     }
 
     func selectModel(_ model: LocalModel) {
+        guard model.status == .ready else {
+            statusMessage = model.compatibility.notes.first ?? "\(model.displayName) is not ready."
+            return
+        }
         guard let index = selectedThreadIndex else { return }
         threads[index].selectedModelID = model.id == LocalModel.appleFoundation.id ? nil : model.id
         threads[index].updatedAt = Date()
@@ -161,13 +181,14 @@ final class AppState: ObservableObject {
                 }
             } catch {
                 await MainActor.run {
+                    let message = readableErrorDescription(error)
                     self.updateAssistantMessage(
                         id: assistantID,
-                        text: "I could not generate a response.\n\n\(error.localizedDescription)",
+                        text: "I could not generate a response.\n\n\(message)",
                         isStreaming: false
                     )
                     self.isGenerating = false
-                    self.statusMessage = error.localizedDescription
+                    self.statusMessage = message
                     self.saveSoon()
                 }
             }
@@ -207,49 +228,124 @@ final class AppState: ObservableObject {
             } catch {
                 await MainActor.run {
                     self.isSearchingModels = false
-                    self.statusMessage = error.localizedDescription
+                    self.statusMessage = readableErrorDescription(error)
                 }
             }
         }
     }
 
     func download(_ model: HuggingFaceModel) {
+        loadVariants(for: model)
+    }
+
+    func loadVariants(for model: HuggingFaceModel) {
         let repoID = model.id
+        if modelVariants[repoID] != nil || loadingVariantRepoIDs.contains(repoID) {
+            return
+        }
+
+        loadingVariantRepoIDs.insert(repoID)
+        statusMessage = "Inspecting \(repoID)"
+        let token = settings.huggingFaceToken
+        let service = HuggingFaceDownloadService()
+
+        Task { [weak self, service, repoID, token] in
+            guard let self else { return }
+            do {
+                let variants = try await service.variants(repoID: repoID, token: token)
+                await MainActor.run {
+                    self.modelVariants[repoID] = variants
+                    self.loadingVariantRepoIDs.remove(repoID)
+                    self.statusMessage = variants.isEmpty
+                        ? "No Core AI variants found"
+                        : "\(variants.count) variants found"
+                }
+            } catch {
+                await MainActor.run {
+                    self.loadingVariantRepoIDs.remove(repoID)
+                    self.statusMessage = readableErrorDescription(error)
+                }
+            }
+        }
+    }
+
+    func download(_ variant: HuggingFaceModelVariant) {
+        guard variant.isChatReadyCandidate else {
+            statusMessage = "\(variant.displayName) is a standalone .aimodel. This chat path needs a Core AI language bundle."
+            return
+        }
+
         let token = settings.huggingFaceToken
         let root: URL
         do {
             root = try persistence.modelsDirectory
         } catch {
-            statusMessage = error.localizedDescription
+            statusMessage = readableErrorDescription(error)
             return
         }
 
-        statusMessage = "Preparing \(model.id)"
+        statusMessage = "Preparing \(variant.displayName)"
         let service = HuggingFaceDownloadService()
-        Task { [weak self, service, repoID, token, root] in
+        Task { [weak self, service, variant, token, root] in
             guard let self else { return }
             do {
                 let localModel = try await service.downloadCoreAIBundle(
-                    repoID: repoID,
+                    variant: variant,
                     token: token,
                     destinationRoot: root
                 ) { progress in
-                    self.downloadProgress[repoID] = progress
+                    self.downloadProgress[variant.id] = progress
                     self.statusMessage = "Downloading \(progress.currentFile)"
                 }
 
                 await MainActor.run {
                     self.upsert(localModel)
-                    self.downloadProgress[repoID] = nil
+                    self.downloadProgress[variant.id] = nil
                     self.statusMessage = localModel.compatibility.isRunnableLanguageModel
                         ? "\(localModel.displayName) is ready"
                         : "\(localModel.displayName) downloaded but is not a Core AI chat bundle"
-                    self.saveSoon()
+                    self.saveNow()
                 }
             } catch {
                 await MainActor.run {
-                    self.downloadProgress[repoID] = nil
-                    self.statusMessage = error.localizedDescription
+                    self.downloadProgress[variant.id] = nil
+                    self.statusMessage = readableErrorDescription(error)
+                }
+            }
+        }
+    }
+
+    func deleteModel(_ model: LocalModel) {
+        guard model.id != LocalModel.appleFoundation.id else {
+            statusMessage = "The Apple Foundation model cannot be deleted."
+            return
+        }
+
+        if isGenerating, selectedModel.id == model.id {
+            stopGeneration()
+        }
+
+        let path = model.localPath
+        let runtime = runtime
+        statusMessage = "Deleting \(model.displayName)"
+        Task.detached(priority: .userInitiated) { [weak self, runtime, modelID = model.id, displayName = model.displayName, path] in
+            do {
+                if let path {
+                    let url = URL(filePath: path, directoryHint: .isDirectory)
+                    if FileManager.default.fileExists(atPath: url.path) {
+                        try FileManager.default.removeItem(at: url)
+                    }
+                }
+                await runtime.reset(modelID: modelID)
+                await MainActor.run {
+                    guard let self else { return }
+                    self.removeDeletedModel(id: modelID)
+                    self.statusMessage = "Deleted \(displayName)"
+                    self.saveNow()
+                }
+            } catch {
+                await MainActor.run {
+                    self?.statusMessage = "Could not delete \(displayName): \(readableErrorDescription(error))"
                 }
             }
         }
@@ -276,6 +372,230 @@ final class AppState: ObservableObject {
         } else {
             localModels.append(model)
         }
+    }
+
+    private func removeDeletedModel(id: String) {
+        localModels.removeAll { $0.id == id }
+        downloadProgress[id] = nil
+        for index in threads.indices where threads[index].selectedModelID == id {
+            threads[index].selectedModelID = nil
+            threads[index].updatedAt = Date()
+        }
+    }
+
+    private func refreshStoredModelCompatibility() -> Bool {
+        var changed = false
+        for index in localModels.indices {
+            guard localModels[index].id != LocalModel.appleFoundation.id else {
+                continue
+            }
+
+            guard let url = resolvedModelDirectory(for: localModels[index]) else {
+                continue
+            }
+
+            let compatibility = CoreAIModelInspector.inspectBundle(at: url)
+            var updated = localModels[index]
+            updated.localPath = url.path
+            updated.compatibility = compatibility
+            updated.bytesOnDisk = HuggingFaceDownloadService.directorySize(at: url)
+            if compatibility.isRunnableLanguageModel {
+                updated.runtime = .coreAIBundle
+                updated.status = .ready
+                if let displayName = compatibility.displayName {
+                    updated.displayName = displayName
+                }
+                updated.subtitle = "Core AI language bundle"
+            } else {
+                updated.runtime = .downloadedFiles
+                updated.status = .unavailable
+                updated.subtitle = compatibility.notes.first ?? "Invalid Core AI language bundle"
+            }
+
+            if updated != localModels[index] {
+                localModels[index] = updated
+                changed = true
+            }
+        }
+        return changed
+    }
+
+    private func recoverDownloadedModels() -> Bool {
+        guard let modelsDirectory = try? persistence.modelsDirectory else { return false }
+
+        var changed = false
+        var recoveredBundleURLs: [URL] = []
+        for bundleURL in downloadedBundleCandidates(in: modelsDirectory) {
+            if recoveredBundleURLs.contains(where: { isNestedDirectory(bundleURL, in: $0) }) {
+                continue
+            }
+
+            let compatibility = CoreAIModelInspector.inspectBundle(at: bundleURL)
+            guard compatibility.isRunnableLanguageModel || compatibility.kind == "llm" || compatibility.kind == "vlm" else {
+                continue
+            }
+            guard let identity = modelIdentity(for: bundleURL, under: modelsDirectory) else {
+                continue
+            }
+            guard !localModels.contains(where: { $0.id == identity.id }) else {
+                recoveredBundleURLs.append(bundleURL)
+                continue
+            }
+
+            let bytes = HuggingFaceDownloadService.directorySize(at: bundleURL)
+            let model = LocalModel(
+                id: identity.id,
+                repoID: identity.repoID,
+                displayName: compatibility.displayName ?? URL(filePath: identity.rootPath).lastPathComponent,
+                subtitle: compatibility.isRunnableLanguageModel
+                    ? "Core AI language bundle"
+                    : compatibility.notes.first ?? "Downloaded Hugging Face files",
+                localPath: bundleURL.path,
+                runtime: compatibility.isRunnableLanguageModel ? .coreAIBundle : .downloadedFiles,
+                status: compatibility.isRunnableLanguageModel ? .ready : .unavailable,
+                bytesOnDisk: bytes,
+                createdAt: identity.downloadedAt ?? creationDate(at: bundleURL) ?? Date(),
+                compatibility: compatibility
+            )
+            localModels.append(model)
+            recoveredBundleURLs.append(bundleURL)
+            changed = true
+        }
+
+        return changed
+    }
+
+    private func resolvedModelDirectory(for model: LocalModel) -> URL? {
+        let storedURL = model.localPath.map {
+            URL(filePath: $0, directoryHint: .isDirectory)
+        }
+        let canonicalURL = canonicalModelDirectory(for: model)
+
+        if let storedURL, hasCoreAIBundleMarker(at: storedURL) {
+            return storedURL
+        }
+        if let canonicalURL, hasCoreAIBundleMarker(at: canonicalURL) {
+            return canonicalURL
+        }
+        if let storedURL, directoryExists(at: storedURL) {
+            return storedURL
+        }
+        if let canonicalURL, directoryExists(at: canonicalURL) {
+            return canonicalURL
+        }
+
+        return canonicalURL ?? storedURL
+    }
+
+    private func canonicalModelDirectory(for model: LocalModel) -> URL? {
+        guard let repoID = model.repoID,
+              let rootPath = variantRootPath(from: model),
+              let modelsDirectory = try? persistence.modelsDirectory else {
+            return nil
+        }
+
+        return HuggingFaceDownloadService.destinationURL(
+            repoID: repoID,
+            rootPath: rootPath,
+            under: modelsDirectory
+        )
+    }
+
+    private func downloadedBundleCandidates(in modelsDirectory: URL) -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: modelsDirectory,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var candidates: [URL] = []
+        for case let url as URL in enumerator {
+            if isCoreAIAssetDirectory(url) {
+                enumerator.skipDescendants()
+                continue
+            }
+
+            guard directoryExists(at: url),
+                  hasCoreAIBundleMarker(at: url) else {
+                continue
+            }
+            candidates.append(url)
+        }
+
+        return candidates.sorted {
+            $0.path.count < $1.path.count
+        }
+    }
+
+    private func modelIdentity(
+        for bundleURL: URL,
+        under modelsDirectory: URL
+    ) -> (id: String, repoID: String, rootPath: String, downloadedAt: Date?)? {
+        if let manifest = HuggingFaceDownloadService.manifest(at: bundleURL) {
+            return (
+                id: manifest.variantID,
+                repoID: manifest.repoID,
+                rootPath: manifest.rootPath,
+                downloadedAt: manifest.downloadedAt
+            )
+        }
+
+        guard let relativePath = relativePath(from: bundleURL, under: modelsDirectory) else {
+            return nil
+        }
+
+        let components = relativePath.split(separator: "/").map(String.init)
+        guard components.count >= 2 else { return nil }
+        let repoID = components[0].replacingOccurrences(of: "__", with: "/")
+        let rootPath = components.dropFirst().joined(separator: "/")
+        return (
+            id: "\(repoID)#\(rootPath)",
+            repoID: repoID,
+            rootPath: rootPath,
+            downloadedAt: nil
+        )
+    }
+
+    private func variantRootPath(from model: LocalModel) -> String? {
+        guard let separator = model.id.firstIndex(of: "#") else { return nil }
+        let start = model.id.index(after: separator)
+        guard start < model.id.endIndex else { return nil }
+        return String(model.id[start...])
+    }
+
+    private func relativePath(from child: URL, under parent: URL) -> String? {
+        let parentPath = parent.standardizedFileURL.path
+        let childPath = child.standardizedFileURL.path
+        let prefix = parentPath + "/"
+        guard childPath.hasPrefix(prefix) else { return nil }
+        return String(childPath.dropFirst(prefix.count))
+    }
+
+    private func isNestedDirectory(_ child: URL, in parent: URL) -> Bool {
+        let parentPath = parent.standardizedFileURL.path
+        let childPath = child.standardizedFileURL.path
+        return childPath.hasPrefix(parentPath + "/")
+    }
+
+    private func hasCoreAIBundleMarker(at url: URL) -> Bool {
+        FileManager.default.fileExists(atPath: url.appending(path: "metadata.json").path)
+    }
+
+    private func isCoreAIAssetDirectory(_ url: URL) -> Bool {
+        let pathExtension = url.pathExtension.lowercased()
+        return pathExtension == "aimodel" || pathExtension == "aimodelc"
+    }
+
+    private func directoryExists(at url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            && isDirectory.boolValue
+    }
+
+    private func creationDate(at url: URL) -> Date? {
+        try? url.resourceValues(forKeys: [.creationDateKey]).creationDate
     }
 
     private func markModelUsed(_ model: LocalModel) {

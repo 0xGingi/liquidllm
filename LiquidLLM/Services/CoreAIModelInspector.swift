@@ -1,15 +1,28 @@
 import CoreAI
+import CoreAILanguageModels
 import Foundation
 
 enum CoreAIModelInspector {
     static func inspectBundle(at directory: URL) -> CoreAICompatibility {
         var notes: [String] = []
         let metadata = readMetadata(in: directory)
-        let assets = findModelAssets(in: directory)
+        let languageBundle: LanguageBundle?
+        do {
+            let bundle = try LanguageBundle(at: directory)
+            try bundle.bundle.verify()
+            languageBundle = bundle
+        } catch {
+            languageBundle = nil
+            notes.append(readableErrorDescription(error))
+        }
+
+        let assets = languageBundle.map(declaredAssetURLs(in:)) ?? findModelAssets(in: directory)
         var functionNames: [String] = []
+        var invalidAssetCount = 0
 
         for assetURL in assets {
             guard AIModelAsset.isValid(at: assetURL) else {
+                invalidAssetCount += 1
                 notes.append("\(assetURL.lastPathComponent) is not a valid Core AI model asset.")
                 continue
             }
@@ -41,12 +54,27 @@ enum CoreAIModelInspector {
             notes.append("Language metadata is missing; tokenizer and context length cannot be resolved.")
         }
 
+        let displayName = languageBundle?.name ?? metadata?.name
+        let requiresCustomRuntime = requiresGemmaStaticInputRuntime(
+            name: displayName,
+            directoryName: directory.lastPathComponent
+        )
+        if requiresCustomRuntime {
+            notes.insert(
+                "This Gemma table bundle requires the zoo's custom static-input runtime, not the generic CoreAILanguageModel path.",
+                at: 0
+            )
+        }
+
         return CoreAICompatibility(
-            isRunnableLanguageModel: isLLM && metadata?.language != nil && !assets.isEmpty,
-            kind: metadata?.kind,
-            displayName: metadata?.name,
-            tokenizer: metadata?.language?.tokenizer,
-            maxContextLength: metadata?.language?.maxContextLength,
+            isRunnableLanguageModel: languageBundle != nil
+                && !requiresCustomRuntime
+                && !assets.isEmpty
+                && invalidAssetCount == 0,
+            kind: languageBundle?.bundle.kind.rawValue ?? metadata?.kind,
+            displayName: displayName,
+            tokenizer: languageBundle?.tokenizer ?? metadata?.language?.tokenizer,
+            maxContextLength: languageBundle?.maxContextLength ?? metadata?.language?.maxContextLength,
             assetCount: assets.count,
             functionNames: Array(Set(functionNames)).sorted(),
             notes: notes
@@ -76,6 +104,15 @@ enum CoreAIModelInspector {
             }
         }
         return urls
+    }
+
+    private static func declaredAssetURLs(in bundle: LanguageBundle) -> [URL] {
+        bundle.componentKeys.compactMap { bundle.modelURL(for: $0) }
+    }
+
+    private static func requiresGemmaStaticInputRuntime(name: String?, directoryName: String) -> Bool {
+        let identifier = "\(name ?? "") \(directoryName)".lowercased()
+        return identifier.contains("gemma4") && identifier.contains("_tbl")
     }
 }
 

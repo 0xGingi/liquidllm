@@ -2,93 +2,161 @@ import SwiftUI
 
 struct SidebarView: View {
     @EnvironmentObject private var appState: AppState
+    @Binding var showingLibrary: Bool
+    @Binding var showingSettings: Bool
+    @Binding var columnVisibility: NavigationSplitViewVisibility
+    var onOpenThread: () -> Void = {}
+    @State private var searchText = ""
+
+    private var filteredThreads: [ChatThread] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return appState.threads }
+        return appState.threads.filter { thread in
+            thread.title.localizedCaseInsensitiveContains(query)
+            || thread.messages.contains { $0.text.localizedCaseInsensitiveContains(query) }
+        }
+    }
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 0) {
             header
+            searchField
+                .padding(.horizontal, 14)
+                .padding(.bottom, 10)
             threadList
-            statusBar
+            footer
         }
-        .padding(18)
-        .background(.clear)
-        .toolbar(removing: .sidebarToggle)
+        .background(AppTheme.background)
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(AppTheme.mint.opacity(0.16))
-                Image(systemName: "sparkles")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(AppTheme.mint)
-            }
-            .frame(width: 46, height: 46)
-            .liquidGlass(cornerRadius: 16, tint: AppTheme.mint.opacity(0.18))
+        HStack(spacing: 10) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(AppTheme.text)
+                .frame(width: 34, height: 34)
+                .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text("Liquid LLM")
-                    .font(.system(.title3, design: .rounded, weight: .bold))
-                    .foregroundStyle(.white)
-                Text("iOS 27 Core AI chat")
-                    .font(.system(.caption, design: .rounded, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.58))
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.text)
+                Text(appState.selectedModel.displayName)
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.secondaryText)
+                    .lineLimit(1)
             }
 
             Spacer()
 
-            Button {
+            IconOnlyButton(
+                systemName: "square.and.pencil",
+                accessibilityLabel: "New chat"
+            ) {
                 appState.createThread()
-            } label: {
-                Image(systemName: "square.and.pencil")
-                    .font(.system(size: 17, weight: .semibold))
-                    .frame(width: 38, height: 38)
+                onOpenThread()
             }
-            .buttonStyle(.glass)
-            .help("New chat")
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 16)
+        .padding(.bottom, 12)
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(AppTheme.tertiaryText)
+            TextField("Search", text: $searchText)
+                .font(.callout)
+                .textFieldStyle(.plain)
+                .foregroundStyle(AppTheme.text)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 38)
+        .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(AppTheme.hairline, lineWidth: 0.5)
         }
     }
 
     private var threadList: some View {
         ScrollView {
-            LazyVStack(spacing: 10) {
-                ForEach(appState.threads) { thread in
-                    Button {
-                        appState.selectedThreadID = thread.id
-                    } label: {
-                        ThreadRow(
-                            thread: thread,
-                            isSelected: thread.id == appState.selectedThreadID
-                        )
+            LazyVStack(spacing: 2) {
+                if filteredThreads.isEmpty {
+                    Text("No chats found")
+                        .font(.callout)
+                        .foregroundStyle(AppTheme.secondaryText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 18)
+                } else {
+                    ForEach(filteredThreads) { thread in
+                        Button {
+                            appState.selectThread(thread.id)
+                            columnVisibility = .detailOnly
+                            onOpenThread()
+                        } label: {
+                            ThreadRow(
+                                thread: thread,
+                                isSelected: thread.id == appState.selectedThreadID
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
-            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
+            .padding(.bottom, 10)
         }
         .scrollIndicators(.hidden)
     }
 
-    private var statusBar: some View {
-        HStack(spacing: 10) {
-            Image(systemName: appState.isGenerating ? "waveform" : "checkmark.seal.fill")
-                .foregroundStyle(appState.isGenerating ? AppTheme.amber : AppTheme.mint)
-            Text(appState.statusMessage)
-                .font(.system(.caption, design: .rounded, weight: .medium))
-                .lineLimit(2)
-                .foregroundStyle(.white.opacity(0.72))
-            Spacer()
+    private var footer: some View {
+        VStack(spacing: 2) {
+            Hairline()
+                .padding(.bottom, 6)
+
+            SidebarActionRow(
+                icon: "cpu",
+                title: "Models",
+                subtitle: "\(appState.localModels.count) on device"
+            ) {
+                showingLibrary = true
+            }
+
+            SidebarActionRow(
+                icon: "slider.horizontal.3",
+                title: "Settings",
+                subtitle: appState.statusMessage
+            ) {
+                showingSettings = true
+            }
+
             Button(role: .destructive) {
                 appState.deleteSelectedThread()
             } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 14, weight: .semibold))
+                HStack(spacing: 12) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 16, weight: .medium))
+                        .frame(width: 24)
+                    Text("Delete chat")
+                        .font(.callout)
+                    Spacer()
+                }
+                .foregroundStyle(appState.threads.count <= 1 ? AppTheme.tertiaryText : AppTheme.destructive)
+                .padding(.horizontal, 14)
+                .frame(height: 44)
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.plain)
             .disabled(appState.threads.count <= 1)
         }
-        .padding(12)
-        .liquidGlass(cornerRadius: 20, tint: .white.opacity(0.06), interactive: true)
+        .padding(.horizontal, 8)
+        .padding(.bottom, 10)
+        .background(AppTheme.background)
     }
 }
 
@@ -97,33 +165,63 @@ private struct ThreadRow: View {
     let isSelected: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
+        HStack(spacing: 10) {
+            Image(systemName: "bubble.left")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(isSelected ? AppTheme.text : AppTheme.secondaryText)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 3) {
                 Text(thread.title)
-                    .font(.system(.callout, design: .rounded, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .font(.callout)
+                    .foregroundStyle(AppTheme.text)
                     .lineLimit(1)
-                Spacer()
-                if isSelected {
-                    Circle()
-                        .fill(AppTheme.mint)
-                        .frame(width: 8, height: 8)
-                }
+                Text("\(thread.messages.count) messages · \(AppTheme.relativeDateString(for: thread.updatedAt))")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.tertiaryText)
+                    .lineLimit(1)
             }
 
-            HStack(spacing: 10) {
-                Label("\(thread.messages.count)", systemImage: "text.bubble")
-                Text(AppTheme.relativeDateString(for: thread.updatedAt))
-            }
-            .font(.system(.caption2, design: .rounded, weight: .medium))
-            .foregroundStyle(.white.opacity(0.52))
+            Spacer()
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlass(
-            cornerRadius: 20,
-            tint: isSelected ? AppTheme.mint.opacity(0.22) : .white.opacity(0.04),
-            interactive: true
+        .padding(.horizontal, 12)
+        .frame(height: 56)
+        .background(
+            isSelected ? AppTheme.surfaceElevated : Color.clear,
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
         )
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+private struct SidebarActionRow: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(AppTheme.secondaryText)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.callout)
+                        .foregroundStyle(AppTheme.text)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.tertiaryText)
+                        .lineLimit(1)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 50)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }

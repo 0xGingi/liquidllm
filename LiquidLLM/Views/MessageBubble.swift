@@ -4,68 +4,94 @@ struct MessageBubble: View {
     let message: ChatMessage
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            if message.role == .user { Spacer(minLength: 48) }
-
-            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 8) {
-                HStack(spacing: 7) {
-                    Image(systemName: icon)
-                        .font(.system(size: 12, weight: .bold))
-                    Text(label)
-                        .font(.system(.caption2, design: .rounded, weight: .bold))
-                    if message.isStreaming {
-                        ProgressView()
-                            .controlSize(.mini)
-                    }
-                }
-                .foregroundStyle(.white.opacity(0.56))
-
-                Text(message.text.isEmpty ? "Thinking..." : message.text)
-                    .font(.system(.body, design: .rounded))
-                    .lineSpacing(4)
-                    .textSelection(.enabled)
-                    .foregroundStyle(.white.opacity(0.92))
-                    .frame(maxWidth: 720, alignment: message.role == .user ? .trailing : .leading)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 13)
-            .liquidGlass(cornerRadius: 24, tint: tint, interactive: message.role == .user)
-
-            if message.role != .user { Spacer(minLength: 48) }
+        switch message.role {
+        case .user:
+            userMessage
+        case .assistant:
+            assistantMessage
+        case .system:
+            systemMessage
         }
+    }
+
+    private var userMessage: some View {
+        HStack(alignment: .bottom) {
+            Spacer(minLength: 44)
+            Text(displayText)
+                .font(.body)
+                .lineSpacing(3)
+                .textSelection(.enabled)
+                .foregroundStyle(AppTheme.text)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(AppTheme.surfaceElevated, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .frame(maxWidth: 540, alignment: .trailing)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 7)
         .frame(maxWidth: .infinity)
     }
 
-    private var icon: String {
-        switch message.role {
-        case .user:
-            "person.fill"
-        case .assistant:
-            "sparkle.magnifyingglass"
-        case .system:
-            "gearshape.fill"
+    private var assistantMessage: some View {
+        HStack(alignment: .top, spacing: 11) {
+            AssistantAvatar(isStreaming: message.isStreaming)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 6) {
+                if message.isStreaming && message.text.isEmpty {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Thinking")
+                            .font(.body)
+                            .foregroundStyle(AppTheme.secondaryText)
+                    }
+                } else {
+                    Text(displayText)
+                        .font(.body)
+                        .lineSpacing(4)
+                        .textSelection(.enabled)
+                        .foregroundStyle(AppTheme.text.opacity(0.92))
+                }
+            }
+            .frame(maxWidth: 720, alignment: .leading)
+
+            Spacer(minLength: 20)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var label: String {
-        switch message.role {
-        case .user:
-            "You"
-        case .assistant:
-            "Assistant"
-        case .system:
-            "System"
-        }
+    private var systemMessage: some View {
+        Text(displayText)
+            .font(.footnote)
+            .lineSpacing(3)
+            .foregroundStyle(AppTheme.secondaryText)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 7)
     }
 
-    private var tint: Color {
-        switch message.role {
-        case .user:
-            AppTheme.blue.opacity(0.18)
-        case .assistant:
-            AppTheme.mint.opacity(0.12)
-        case .system:
-            AppTheme.amber.opacity(0.14)
+    private var displayText: String {
+        message.text.isEmpty ? "Thinking..." : message.text
+    }
+}
+
+private struct AssistantAvatar: View {
+    let isStreaming: Bool
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(AppTheme.surface)
+                .frame(width: 28, height: 28)
+            Image(systemName: isStreaming ? "waveform" : "sparkles")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(AppTheme.text)
         }
     }
 }

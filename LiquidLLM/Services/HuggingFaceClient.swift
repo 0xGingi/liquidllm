@@ -19,6 +19,10 @@ enum HuggingFaceError: LocalizedError {
 
 struct HuggingFaceClient: Sendable {
     func searchModels(query: String, token: String?) async throws -> [HuggingFaceModel] {
+        if let repoID = Self.repoID(from: query) {
+            return [try await modelInfo(repoID: repoID, token: token)]
+        }
+
         var components = URLComponents(string: "https://huggingface.co/api/models")
         components?.queryItems = [
             URLQueryItem(name: "search", value: query),
@@ -61,6 +65,23 @@ struct HuggingFaceClient: Sendable {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         return request
+    }
+
+    private static func repoID(from query: String) -> String? {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let url = URL(string: trimmed),
+           let host = url.host?.lowercased(),
+           host == "huggingface.co" || host.hasSuffix(".huggingface.co") {
+            let components = url.pathComponents.filter { $0 != "/" }
+            guard components.count >= 2 else { return nil }
+            return "\(components[0])/\(components[1])"
+        }
+
+        let parts = trimmed.split(separator: "/")
+        guard parts.count == 2, !trimmed.contains(" ") else { return nil }
+        return trimmed
     }
 
     private func decode<T: Decodable>(_ type: T.Type, from url: URL, token: String?) async throws -> T {

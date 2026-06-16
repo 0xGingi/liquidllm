@@ -181,7 +181,7 @@
 			mainGroup = A40000000000000000000001;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				A90000000000000000000001 /* XCRemoteSwiftPackageReference "coreai-models" */,
+				A90000000000000000000001 /* XCLocalSwiftPackageReference "coreai-models" */,
 			);
 			preferredProjectObjectVersion = 110;
 			productRefGroup = A40000000000000000000009 /* Products */;
@@ -404,21 +404,17 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		A90000000000000000000001 /* XCRemoteSwiftPackageReference "coreai-models" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/apple/coreai-models.git";
-			requirement = {
-				branch = main;
-				kind = branch;
-			};
+/* Begin XCLocalSwiftPackageReference section */
+		A90000000000000000000001 /* XCLocalSwiftPackageReference "coreai-models" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/coreai-models;
 		};
-/* End XCRemoteSwiftPackageReference section */
+/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		A90000000000000000000002 /* CoreAILM */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = A90000000000000000000001 /* XCRemoteSwiftPackageReference "coreai-models" */;
+			package = A90000000000000000000001 /* XCLocalSwiftPackageReference "coreai-models" */;
 			productName = CoreAILM;
 		};
 /* End XCSwiftPackageProductDependency section */

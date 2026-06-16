@@ -6,6 +6,7 @@ enum LLMRuntimeError: LocalizedError {
     case missingCoreAIBundle
     case unsupportedDownloadedModel(String)
     case systemModelUnavailable(String)
+    case coreAIModelLoadFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -15,6 +16,8 @@ enum LLMRuntimeError: LocalizedError {
             "This download cannot run as a local chat model yet. \(reason)"
         case .systemModelUnavailable(let reason):
             "Apple Foundation Model is unavailable. \(reason)"
+        case .coreAIModelLoadFailed(let reason):
+            "Core AI could not load this model bundle. \(reason)"
         }
     }
 }
@@ -30,6 +33,10 @@ actor LLMRuntime {
 
     func reset(threadID: UUID) {
         sessions = sessions.filter { $0.key.threadID != threadID }
+    }
+
+    func reset(modelID: String) {
+        sessions = sessions.filter { $0.key.modelID != modelID }
     }
 
     func streamReply(
@@ -94,8 +101,16 @@ actor LLMRuntime {
         case .coreAIBundle:
             guard let path = model.localPath else { throw LLMRuntimeError.missingCoreAIBundle }
             let url = URL(filePath: path, directoryHint: .isDirectory)
-            let coreModel = try await CoreAILanguageModel(resourcesAt: url)
-            created = LanguageModelSession(model: coreModel, instructions: settings.systemPrompt)
+            guard FileManager.default.fileExists(atPath: url.appending(path: "metadata.json").path) else {
+                throw LLMRuntimeError.coreAIModelLoadFailed("metadata.json was not found at \(url.path).")
+            }
+            do {
+                setenv("COREAI_CHUNK_THRESHOLD", "1", 1)
+                let coreModel = try await CoreAILanguageModel(resourcesAt: url)
+                created = LanguageModelSession(model: coreModel, instructions: settings.systemPrompt)
+            } catch {
+                throw LLMRuntimeError.coreAIModelLoadFailed(readableErrorDescription(error))
+            }
 
         case .downloadedFiles:
             let reason = model.compatibility.notes.first ?? "Expected a Core AI language bundle with metadata.json and .aimodel assets."
